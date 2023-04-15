@@ -39,7 +39,7 @@ class Downsample(nn.Module):
         super().__init__()
         self.conv = torch.nn.Conv2d(
             in_channels, in_channels, kernel_size=kernel_size, stride=2,
-            padding='same',
+            padding=1,
         )
 
     def forward(self, x):
@@ -47,7 +47,7 @@ class Downsample(nn.Module):
         return x
 
 class ResnetBlock(nn.Module):
-    def __init__(self, in_channels, dropout, out_channels=None):
+    def __init__(self, in_channels, dropout=0.0, out_channels=None):
         super().__init__()
         self.in_channels = in_channels
         out_channels = in_channels if out_channels is None else out_channels
@@ -89,32 +89,123 @@ class DownBlock(nn.Module):
     def forward(self, input):
         return input
 
-class Encoder(nn.Module):
-    def __init__(self):
+class AttnBlock(nn.Module):
+    def __init__(self, in_channels):
         super().__init__()
+        self.in_channels = in_channels
+        self.norm = Normalize(in_channels)
+        self.q = nn.Conv2d(
+            in_channels, in_channels, kernel_size=1, stride=1, padding=0,
+        )
+        self.k = nn.Conv2d(
+            in_channels, in_channels, kernel_size=1, stride=1, padding=0,
+        )
+        self.v = nn.Conv2d(
+            in_channels, in_channels, kernel_size=1, stride=1, padding=0,
+        )
+        self.proj_out = nn.Conv2d(
+            in_channels, in_channels, kernel_size=1, stride=1, padding=0,
+        )
+
+    def forward(self, x):
+        h_ = x
+        h_ = self.norm(h_)
+        q = self.q(h_)
+        k = self.k(h_)
+        v = self.v(h_)
+
+        # compute attention
+        b, c, h, w = q.shape
+        q = q.reshape(b, c, h*w)
+        q = q.permute(0, 2, 1)     # [b, hw, c]
+        k = k.reshape(b, c, h*w)   # [b, c, hw]
+        w_ = torch.bmm(q, k)       # [b, hw, hw]
+        w_ = w_ * (int(c)**(-0.5))
+        w_ = torch.nn.functional.softmax(w_, dim=2)
+
+        # attend to values
+        v = v.reshape(b, c, h*w)
+        w_ = w_.permute(0, 2, 1)   # [b, hw, hw] (first hw of k, second of q)
+        h_ = torch.bmm(v, w_)      # [b, c, hw] (hw of q) h_[b,c,j] = sum_i v[b,c,i] w_[b,i,j]
+        h_ = h_.reshape(b, c, h, w)
+        h_ = self.proj_out(h_)
+
+        return x + h_
+
+class Encoder(nn.Module):
+    def __init__(
+        self, in_channels, base_ch, num_res_blocks, latent_channels, ch_mult=(1,2,4,8)
+    ):
+        super().__init__()
+        layers = []
+        layers.append(nn.Conv2d(
+            in_channels, base_ch, kernel_size=3, stride=1, padding='same',
+        ))
+        in_channels = base_ch
+        for mul in ch_mult:
+            out_channels = base_ch * mul
+            for _ in range(num_res_blocks):
+                layers.append(ResnetBlock(in_channels, out_channels=out_channels))
+                in_channels = out_channels
+            layers.append(Downsample(in_channels))
+        layers.append(ResnetBlock(in_channels))
+        layers.append(AttnBlock(in_channels))
+        layers.append(ResnetBlock(in_channels))
+        layers.append(Normalize(in_channels))
+        layers.append(nn.Conv2d(
+            in_channels, latent_channels, kernel_size=3, stride=1, padding='same',
+        ))
+        self.layers = nn.Sequential(*layers)
 
     def forward(self, input):
-        return input
+        latent = self.layers(input)
+        return latent
 
 class Decoder(nn.Module):
-    def __init__(self):
+    def __init__(
+        self, out_channels, base_ch, num_res_blocks, latent_channels, ch_mult=(8,4,2,1)
+    ):
         super().__init__()
+        layers = []
+        out_channels_ = out_channels
+        in_channels = base_ch * ch_mult[0]
+        layers.append(nn.Conv2d(
+            latent_channels, in_channels, kernel_size=3, stride=1, padding='same',
+        ))
+        layers.append(ResnetBlock(in_channels))
+        layers.append(AttnBlock(in_channels))
+        layers.append(ResnetBlock(in_channels))
+        for mul in ch_mult:
+            out_channels = base_ch * mul
+            for _ in range(num_res_blocks):
+                layers.append(ResnetBlock(in_channels, out_channels=out_channels))
+                in_channels = out_channels
+            layers.append(Upsample(in_channels))
+        layers.append(Normalize(in_channels))
+        layers.append(nn.Conv2d(
+            in_channels, out_channels_, kernel_size=3, stride=1, padding='same',
+        ))
+        self.layers = nn.Sequential(*layers)
 
     def forward(self, input):
-        return input
+        latent = self.layers(input)
+        return latent
 
 class VQModel(nn.Module):
     def __init__(
-        self, latent_channels=3, in_channels=3, out_channels=3, vq_embed_dim=None,
+        self, latent_channels=8, in_channels=3, out_channels=3, vq_embed_dim=None,
+        base_ch=32, num_res_blocks=2, 
     ):
         super().__init__()
-
-        self.encoder = Encoder()
+        self.encoder = Encoder(in_channels, base_ch, num_res_blocks, latent_channels)
         vq_embed_dim = vq_embed_dim if vq_embed_dim else latent_channels
-        self.quant_conv = nn.Conv2d(latent_channels, vq_embed_dim, 1)
+        self.quant_conv = nn.Sequential(
+            nn.Conv2d(latent_channels, vq_embed_dim, 1),
+            nn.Sigmoid(),
+        )
         self.quantize = VectorQuantizer()
         self.post_quant_conv = nn.Conv2d(vq_embed_dim, latent_channels, 1)
-        self.decoder = Decoder()
+        self.decoder = Decoder(out_channels, base_ch, num_res_blocks, latent_channels)
 
     def forward(self, input):
         h = self.encoder(input)
