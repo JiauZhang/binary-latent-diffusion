@@ -4,5 +4,5 @@
 Implementation of [Binary Latent Diffusion](https://arxiv.org/abs/2304.04820).
 
 ```shell
-pip install datasets
+pip install datasets lossers
 ```
