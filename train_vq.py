@@ -1,7 +1,7 @@
 from tqdm import tqdm
 from torch import nn, optim
 import torch, argparse, math
-from vq_model import VQModel
+from model.vq_model import VQModel
 from lossers.lpips import LPIPS
 from datasets import load_dataset
 from torch.utils.data import DataLoader
