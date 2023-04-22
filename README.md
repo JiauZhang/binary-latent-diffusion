@@ -4,7 +4,7 @@
 Implementation of [Binary Latent Diffusion](https://arxiv.org/abs/2304.04820).
 
 ```shell
-pip install datasets lossers==0.0.6
+pip install datasets lossers==0.0.7
 ```
 
 | input image | reconstruction | iterations | loss |
