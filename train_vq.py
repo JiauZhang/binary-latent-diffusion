@@ -24,7 +24,7 @@ parser.add_argument("--size", type=int, default=64, help="image sizes for the mo
 args = parser.parse_args()
 
 model = VQModel().to(args.device)
-lpips = LPIPS(net='vgg').to(args.device)
+lpips = LPIPS(net='vgg', cache_dir=args.cache_dir).to(args.device)
 discriminator = NLayerDiscriminator().to(args.device)
 vq_optim = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0, 0.999))
 d_optim = torch.optim.Adam(discriminator.parameters(), lr=1e-3, betas=(0, 0.999))
@@ -35,7 +35,8 @@ to_tensor = transforms.Compose([
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
 ])
 def preprocess(data):
-    data['image'][0] = to_tensor(data['image'][0]).to(args.device)
+    for i in range(len(data['image'])):
+        data['image'][i] = to_tensor(data['image'][i])
     return data
 dataset = load_dataset(args.dataset, split="train", cache_dir=args.cache_dir)
 dataset = dataset.with_transform(preprocess)
@@ -45,7 +46,7 @@ pbar = tqdm(range(args.iter))
 sample = next(dataloader)['image']
 
 for idx in pbar:
-    image = next(dataloader)['image']
+    image = next(dataloader)['image'].to(args.device)
     # train vqmodel
     requires_grad(model, True)
     requires_grad(discriminator, False)
