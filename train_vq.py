@@ -43,7 +43,11 @@ dataset = dataset.with_transform(preprocess)
 dataloader = DataLoader(dataset, batch_size=args.batch, shuffle=True, drop_last=True)
 dataloader = sample_data(dataloader)
 pbar = tqdm(range(args.iter))
-sample = next(dataloader)['image']
+sample = next(dataloader)['image'].to(args.device)
+utils.save_image(
+    sample, f"sample/sample.png",
+    nrow=int(math.sqrt(args.batch)), normalize=True, value_range=(-1, 1),
+)
 
 for idx in pbar:
     image = next(dataloader)['image'].to(args.device)
@@ -54,13 +58,14 @@ for idx in pbar:
     lpips_loss = lpips(image, rec).mean()
     fake_pred = discriminator(rec)
     g_loss = g_loss_fn(fake_pred)
-    loss = lpips_loss + g_loss
+    loss = lpips_loss + 0.01 * g_loss
     vq_optim.zero_grad()
     loss.backward()
     vq_optim.step()
     # train discriminator
     requires_grad(model, False)
     requires_grad(discriminator, True)
+    rec = model(image)
     real_pred, fake_pred = discriminator(image), discriminator(rec.detach())
     d_loss = d_loss_fn(real_pred, fake_pred)
     d_optim.zero_grad()
