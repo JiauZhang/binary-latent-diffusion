@@ -6,7 +6,7 @@ from lossers.lpips import LPIPS
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from torchvision import transforms, utils
-from torchvision.transforms import functional as F
+from torchvision.transforms import functional as tvf
 from model.discriminator import NLayerDiscriminator
 from lossers.gan import (
     hinge_d_loss as d_loss_fn,
@@ -30,7 +30,7 @@ vq_optim = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0, 0.999))
 d_optim = torch.optim.Adam(discriminator.parameters(), lr=1e-3, betas=(0, 0.999))
 
 to_tensor = transforms.Compose([
-    transforms.Resize(args.size),
+    transforms.Resize(args.size, interpolation=tvf.InterpolationMode.LANCZOS),
     transforms.ToTensor(),
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
 ])
@@ -58,7 +58,7 @@ for idx in pbar:
     lpips_loss = lpips(image, rec).mean()
     fake_pred = discriminator(rec)
     g_loss = g_loss_fn(fake_pred)
-    loss = lpips_loss + 0.01 * g_loss
+    loss = lpips_loss + 0.001 * g_loss
     vq_optim.zero_grad()
     loss.backward()
     vq_optim.step()
@@ -83,3 +83,10 @@ for idx in pbar:
                 rec, f"sample/{str(idx).zfill(6)}.png",
                 nrow=int(math.sqrt(args.batch)), normalize=True, value_range=(-1, 1),
             )
+
+    if idx % 5000 == 0:
+        torch.save({
+            'vq_model': model.state_dict(),
+            'disc': discriminator.state_dict(),
+            }, f"checkpoints/{str(idx).zfill(6)}.pt",
+        )
