@@ -1,3 +1,3 @@
-from model.diffusion import UNet
+from model.diffusion import Transformer2D
 
-model = UNet()
+model = Transformer2D(32, 4)
